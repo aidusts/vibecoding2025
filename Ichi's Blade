@@ -1,0 +1,1251 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Ninja Endless Runner</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        background-color: #1a1a1a; /* Резервный цвет фона */
+        overflow: hidden;
+        touch-action: none;
+      }
+      canvas {
+        max-width: 500px;
+        max-height: 1000px;
+        width: 100%;
+        height: 100%;
+        border: 2px solid #fff;
+        position: relative;
+        z-index: 0; /* Канвас поверх фона */
+        background: transparent; /* Прозрачный фон канваса */
+      }
+      #gameOverScreen {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 20px;
+        text-align: center;
+        display: none;
+        border-radius: 10px;
+        z-index: 1; /* Поверх канваса */
+      }
+      #restartButton {
+        margin-top: 20px;
+        padding: 10px 20px;
+        font-size: 18px;
+        cursor: pointer;
+        background: #4caf50;
+        border: none;
+        color: white;
+        border-radius: 5px;
+      }
+      /* Контейнер для фонового слоя */
+      .background-container {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        z-index: -1; /* Фон под канвасом */
+      }
+      /* Слой фона */
+      .background-layer {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 200%; /* Двойная высота для бесшовной прокрутки */
+        background-repeat: repeat;
+        background-size: 167px 200px; /* Размер тайла для ~3x5 на экране 500x1000 */
+        animation: scroll linear infinite;
+      }
+      /* Трава (единственный слой фона) */
+      #grass-layer {
+        z-index: -1; /* Под канвасом */
+        background-image: url("https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/final-N3fbub9olxEEM4T6LeHF7Mt8MtpmYE.png?eiQL");
+        animation-duration: 10s;
+        background-color: transparent;
+      }
+      /* Анимация прокрутки вниз */
+      @keyframes scroll {
+        from {
+          transform: translateY(-50%); /* Начинаем с верхней части двойной высоты */
+        }
+        to {
+          transform: translateY(0); /* Движемся вниз */
+        }
+      }
+      /* Начальный экран */
+      #startScreen {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 80%;
+        max-width: 400px;
+        height: 60%;
+        max-height: 600px;
+        background-image: url("https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/svt-Nm3bOAmRJcUcAheHY828yLw4Pg9KN0.png?0KAM");
+        background-size: contain;
+        background-repeat: no-repeat;
+        background-position: center;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 1; /* Поверх канваса */
+        color: #000;
+        font-family: Arial, sans-serif;
+        text-align: center;
+        padding: 20px;
+      }
+      #startScreen p {
+        font-size: 20px;
+        font-weight: bold;
+        line-height: 1.4;
+        margin: 0 0 20px;
+        max-width: 250px;
+        text-shadow: 1px 1px 2px rgba(255, 255, 255, 0.5);
+      }
+      #startButton {
+        padding: 10px 20px;
+        font-size: 18px;
+        cursor: pointer;
+        background: #8b4513;
+        border: 2px solid #fff;
+        color: white;
+        border-radius: 5px;
+        transition: background 0.3s;
+      }
+      #startButton:hover {
+        background: #a0522d;
+      }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@farcade/game-sdk@latest/dist/index.min.js">
+      // SDK: Обработка событий play_again и toggle_mute
+      window.FarcadeSDK.on("play_again", () => {
+        restartButton.click();
+      });
+
+      window.FarcadeSDK.on("toggle_mute", (data) => {
+        backgroundMusic.muted = data.isMuted;
+        loseLifeSound.muted = data.isMuted;
+        collectBonusSound.muted = data.isMuted;
+        ghostDieSound.muted = data.isMuted;
+        barricadeBreakSound.muted = data.isMuted;
+        swordSwingSound.muted = data.isMuted;
+      });
+    </script>
+  </head>
+  <body>
+    <!-- Контейнер для фонового слоя -->
+    <div class="background-container">
+      <div id="grass-layer" class="background-layer"></div>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+    <div id="startScreen">
+      <p>
+        Your goal is<br />
+        to clear the valley<br />
+        of ghosts.
+      </p>
+      <button id="startButton">START</button>
+    </div>
+    <div id="gameOverScreen">
+      <h1>Game Over</h1>
+      <p id="finalScore"></p>
+      <p id="finalDistance"></p>
+      <p id="highScore"></p>
+      <button id="restartButton">Restart</button>
+    </div>
+    <script>
+      const canvas = document.getElementById("gameCanvas");
+      const ctx = canvas.getContext("2d");
+      const startScreen = document.getElementById("startScreen");
+      const startButton = document.getElementById("startButton");
+      const gameOverScreen = document.getElementById("gameOverScreen");
+      const restartButton = document.getElementById("restartButton");
+
+      // Load images
+      const warriorLeftLeg = new Image();
+      warriorLeftLeg.src =
+        "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/1-FINAL-Rrv3hlF50zttVkeM2gX6RsQUpAflQX.png?0I99";
+      warriorLeftLeg.onerror = () => console.error("Warrior left leg image failed to load");
+      const warriorRightLeg = new Image();
+      warriorRightLeg.src =
+        "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/4-FINAL-uMAoFg0xWmkk4QvHUNPzEcZin9ncP1.png?jdtA";
+      warriorRightLeg.onerror = () => console.error("Warrior right leg image failed to load");
+      const warriorAttack = new Image();
+      warriorAttack.src =
+        "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/dswopsd-FINAL-Rdiy7fAg4ItUmktIqcEsNorS6HcfH7.png?98Fe";
+      warriorAttack.onerror = () => console.error("Warrior attack image failed to load");
+      const attackWaveSprite = new Image();
+      attackWaveSprite.src =
+        "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/wave2-R7X7KqOKjmdi9sUoJ6RKkVrOFesvAm.png?A35f";
+      attackWaveSprite.onerror = () => console.error("Attack wave image failed to load");
+      const ghostSprite = new Image();
+      ghostSprite.src =
+        "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/ghost-orPUSWyH80EK0Y20Wb4jB2xzPly1Yh.png?Dsd5";
+      ghostSprite.onerror = () => console.error("Ghost sprite image failed to load");
+      const barricadeSprite = new Image();
+      barricadeSprite.src =
+        "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/gp2t3-Rc5bqpKwQlH4aup6uFs5EOYaBiv95W.png?yZxD";
+      barricadeSprite.onerror = () => console.error("Barricade sprite image failed to load");
+      const indestructibleSprite = new Image();
+      indestructibleSprite.src =
+        "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/gpt4hole-FINAL-4EIBFiRDXKbNK4pDvj4DSxlENqqoDA.png?piP9";
+      indestructibleSprite.onerror = () => console.error("Indestructible sprite image failed to load");
+      const butterflySprite = new Image();
+      butterflySprite.src =
+        "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/batrfly-MxGi9Pe7jaLD2NOQLc5jtADAllysjH.png?swZh";
+      butterflySprite.onerror = () => console.error("Butterfly sprite image failed to load");
+      const sushiSprite = new Image();
+      sushiSprite.src =
+        "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/coin-t3RyWOPGUCHS2RLdR1PbnZXQiZxxCn.png?AfQM";
+      sushiSprite.onerror = () => console.error("Sushi sprite image failed to load");
+
+      // Load power-up sprites
+      const speedPowerUpSprite = new Image();
+      speedPowerUpSprite.src =
+        "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/fastrun-sqlB6D4KfMv6bl8G1W6v1n2y9rmB3W.png?xy4G";
+      speedPowerUpSprite.onerror = () => console.error("Speed power-up sprite failed to load");
+      const weaponRangePowerUpSprite = new Image();
+      weaponRangePowerUpSprite.src =
+        "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/swooor-sH2Yz6K6Lk2NzXhqB5mvmpgZYTTqj5.png?RO3n";
+      weaponRangePowerUpSprite.onerror = () => console.error("Weapon range power-up sprite failed to load");
+      const shieldPowerUpSprite = new Image();
+      shieldPowerUpSprite.src =
+        "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/chtka6-xiTDjoU6VsIgx3e0aRWHInti5thQKy.png?QF4z";
+      shieldPowerUpSprite.onerror = () => console.error("Shield power-up sprite failed to load");
+      const weaponCooldownPowerUpSprite = new Image();
+      weaponCooldownPowerUpSprite.src =
+        "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/nihiri-zOT5t3YVPcknygS82ztceowCLQVgl5.png?09C8";
+      weaponCooldownPowerUpSprite.onerror = () => console.error("Weapon cooldown power-up sprite failed to load");
+
+      // Load sound effects
+      const backgroundMusic = new Audio(
+        "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/background-FINAL-5FMJHZd5O2MaxFERk20VB6uDSM4sNZ.mp3?iZsZ",
+      );
+      backgroundMusic.loop = true;
+      backgroundMusic.volume = 0.05;
+      backgroundMusic.onerror = () => console.error("Background music failed to load");
+      const loseLifeSound = new Audio(
+        "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/dpain-FINAL-veGT2HJTACSFTak6EtIbzvrE7mbB2h.mp3?Z1PL",
+      );
+      loseLifeSound.onerror = () => console.error("Lose life sound failed to load");
+      const collectBonusSound = new Audio(
+        "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/bonus-FINAL-IxJkFxlCw3Pofk4jGGwhuOy4agNaJH.mp3?0i2H",
+      );
+      collectBonusSound.onerror = () => console.error("Collect bonus sound failed to load");
+      const ghostDieSound = new Audio(
+        "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/ghostDie-FINAL-T2lpMKoeLGuLEmvaf5wK45IoIk1yG3.mp3?uYAC",
+      );
+      ghostDieSound.onerror = () => console.error("Ghost die sound failed to load");
+      const barricadeBreakSound = new Audio(
+        "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/wood-FINAL-FHPLwMPZi3wnsF0kWf4IMT0VjAe9Yv.mp3?k2k2",
+      );
+      barricadeBreakSound.onerror = () => console.error("Barricade break sound failed to load");
+      const swordSwingSound = new Audio(
+        "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/1C4VzSXdpQZB/sword-FINAL-U88AyCNmNrmFFwuvGfhrcgGQtLffCg.mp3?IBEg",
+      );
+      swordSwingSound.onerror = () => console.error("Sword swing sound failed to load");
+
+      // Function to play sound with reset to avoid overlap
+      function playSound(audio) {
+        audio.currentTime = 0;
+        audio.play().catch((err) => console.warn("Audio play failed:", err));
+      }
+
+      // Start background music on user interaction
+      function startBackgroundMusic() {
+        playSound(backgroundMusic);
+      }
+
+      // Add event listeners to start music on first interaction
+      let musicStarted = false;
+      window.addEventListener("keydown", () => {
+        if (!musicStarted && gameState.isRunning) {
+          startBackgroundMusic();
+          musicStarted = true;
+        }
+      });
+      canvas.addEventListener("touchstart", () => {
+        if (!musicStarted && gameState.isRunning) {
+          startBackgroundMusic();
+          musicStarted = true;
+        }
+      });
+      canvas.addEventListener("mousedown", () => {
+        if (!musicStarted && gameState.isRunning) {
+          startBackgroundMusic();
+          musicStarted = true;
+        }
+      });
+
+      // Responsive canvas
+      function resizeCanvas() {
+        const aspectRatio = 0.5;
+        let width = Math.min(500, window.innerWidth);
+        let height = Math.min(1000, window.innerHeight);
+        if (width / height > aspectRatio) width = height * aspectRatio;
+        else height = width / aspectRatio;
+        canvas.width = width;
+        canvas.height = height;
+        // Обновляем размер тайлов в зависимости от размера канваса
+        const tileWidth = canvas.width / 3; // 3 тайла по горизонтали
+        const tileHeight = canvas.height / 5; // 5 тайлов по вертикали
+        document.querySelectorAll(".background-layer").forEach((layer) => {
+          layer.style.backgroundSize = `${tileWidth}px ${tileHeight}px`;
+        });
+      }
+      resizeCanvas();
+      window.addEventListener("resize", resizeCanvas);
+
+      // Game state
+      let gameState = {
+        lives: 3,
+        score: 0,
+        distance: 0,
+        multiplier: 1,
+        consecutiveHits: 0,
+        speed: 5,
+        baseSpeed: 5,
+        difficultyFactor: 1,
+        player: {
+          x: canvas.width / 2,
+          y: canvas.height * 0.75,
+          width: 30,
+          height: 30,
+          visualWidth: 150,
+          visualHeight: 150,
+          velocityX: 0,
+          maxSpeed: 6,
+          acceleration: 0.8,
+          friction: 0.95,
+          shield: false,
+          shieldActive: false,
+          shieldTimer: 0,
+          shieldBlinkActive: false,
+          shieldBlinkTimer: 300,
+          attackRange: 200,
+          attackCooldown: 0,
+          attackWaveWidth: 30,
+          attackWaveVisualWidth: 112.5,
+          attackWaveVisualHeight: 75,
+          attackCooldownBase: 300,
+          speedBoost: false,
+          currentFrame: 0,
+          lastFrameSwitch: 0,
+          frameDuration: 200,
+          isAttacking: false,
+          attackAnimationTimer: 0,
+          attackAnimationDuration: 300,
+          isInvulnerable: false,
+          invulnerabilityTimer: 0,
+          invulnerabilityDuration: 1000,
+          isVisible: true,
+          blinkTimer: 0,
+          blinkInterval: 300,
+        },
+        obstacles: [],
+        powerUps: [],
+        creatures: [],
+        sushiRolls: [],
+        particles: [],
+        attackWaves: [],
+        lastSpawn: 0,
+        spawnInterval: 60,
+        isRunning: false, // Игра не начата
+        lastTime: 0,
+      };
+
+      // Particle pool
+      const particlePool = [];
+      let highScore = localStorage.getItem("highScore") ? parseInt(localStorage.getItem("highScore")) : 0;
+
+      // Input handling
+      let keys = {};
+      let touchStartX = 0;
+      let isAttacking = false;
+      let leftArrowPressed = false;
+      let rightArrowPressed = false;
+      let attackButtonPressed = false;
+      window.addEventListener("keydown", (e) => {
+        keys[e.key] = true;
+      });
+      window.addEventListener("keyup", (e) => {
+        keys[e.key] = false;
+      });
+      canvas.addEventListener("mousedown", (e) => {
+        if (e.button === 0) isAttacking = true;
+      });
+      canvas.addEventListener("touchstart", (e) => {
+        e.preventDefault();
+        let touch = e.touches[0];
+        let canvasRect = canvas.getBoundingClientRect();
+        let touchX = (touch.clientX - canvasRect.left) * (canvas.width / canvasRect.width);
+        let touchY = (touch.clientY - canvasRect.top) * (canvas.height / canvasRect.height);
+        if (touchX >= 10 && touchX <= 60 && touchY >= canvas.height - 60 && touchY <= canvas.height - 10) {
+          leftArrowPressed = true;
+        } else if (
+          touchX >= canvas.width - 60 &&
+          touchX <= canvas.width - 10 &&
+          touchY >= canvas.height - 60 &&
+          touchY <= canvas.height - 10
+        ) {
+          rightArrowPressed = true;
+        } else if (
+          touchX >= canvas.width / 2 - 25 &&
+          touchX <= canvas.width / 2 + 25 &&
+          touchY >= canvas.height - 60 &&
+          touchY <= canvas.height - 10
+        ) {
+          attackButtonPressed = true;
+        } else {
+          touchStartX = touchX;
+          isAttacking = true;
+        }
+      });
+      canvas.addEventListener("touchmove", (e) => {
+        e.preventDefault();
+        let touch = e.touches[0];
+        let canvasRect = canvas.getBoundingClientRect();
+        let touchX = (touch.clientX - canvasRect.left) * (canvas.width / canvasRect.width);
+        let touchY = (touch.clientY - canvasRect.top) * (canvas.height / canvasRect.height);
+        leftArrowPressed = touchX >= 10 && touchX <= 60 && touchY >= canvas.height - 60 && touchY <= canvas.height - 10;
+        rightArrowPressed =
+          touchX >= canvas.width - 60 &&
+          touchX <= canvas.width - 10 &&
+          touchY >= canvas.height - 60 &&
+          touchY <= canvas.height - 10;
+        attackButtonPressed =
+          touchX >= canvas.width / 2 - 25 &&
+          touchX <= canvas.width / 2 + 25 &&
+          touchY >= canvas.height - 60 &&
+          touchY <= canvas.height - 10;
+        if (!leftArrowPressed && !rightArrowPressed && !attackButtonPressed) {
+          let deltaX = touchX - touchStartX;
+          let moveDistance = deltaX * 0.02;
+          gameState.player.x = Math.max(
+            gameState.player.width / 2,
+            Math.min(canvas.width - gameState.player.width / 2, gameState.player.x + moveDistance),
+          );
+          touchStartX = touchX;
+        }
+      });
+      canvas.addEventListener("touchend", (e) => {
+        e.preventDefault();
+        leftArrowPressed = false;
+        rightArrowPressed = false;
+        attackButtonPressed = false;
+        isAttacking = false;
+        gameState.player.velocityX = 0;
+      });
+
+      // Obstacle types
+      const obstacleTypes = [
+        { type: "static", width: 50, height: 50, color: "#ff4444", destructible: false },
+        { type: "moving", width: 50, height: 50, color: "#ffaa00", destructible: true, speed: 2 },
+        { type: "destructible", width: 60, height: 60, color: "#44ff44", destructible: true },
+        { type: "diagonal", width: 50, height: 50, color: "#ffaa00", destructible: true, speed: 2, vy: 1 },
+      ];
+
+      // Power-up types
+      const powerUpTypes = [
+        {
+          type: "speed",
+          color: "#00ffff",
+          effect: () => {
+            gameState.player.speedBoost = true;
+            gameState.baseSpeed *= 1.5;
+            gameState.baseSpeed *= 1.01;
+            setTimeout(() => {
+              gameState.player.speedBoost = false;
+              gameState.baseSpeed /= 1.5;
+            }, 5000);
+          },
+        },
+        {
+          type: "shield",
+          color: "#ff00ff",
+          effect: () => {
+            gameState.player.shield = true;
+            gameState.player.isInvulnerable = true;
+            gameState.player.shieldActive = true;
+            gameState.player.shieldTimer = 5000;
+            gameState.player.shieldBlinkActive = true;
+            gameState.player.shieldBlinkTimer = 300;
+            setTimeout(() => {
+              gameState.player.shield = false;
+              gameState.player.isInvulnerable = false;
+              gameState.player.shieldActive = false;
+              gameState.player.shieldBlinkActive = false;
+              gameState.player.isVisible = true;
+            }, 5000);
+          },
+        },
+        {
+          type: "weapon_range",
+          color: "#ffff00",
+          effect: () => {
+            gameState.player.attackRange *= 1.1;
+          },
+        },
+        {
+          type: "weapon_cooldown",
+          color: "#ff9900",
+          effect: () => {
+            gameState.player.attackCooldownBase *= 0.87;
+          },
+        },
+        {
+          type: "life",
+          color: "#ff0000",
+          effect: () => {
+            if (gameState.lives < 3) gameState.lives++;
+          },
+        },
+      ];
+
+      // Particle system
+      function createParticles(x, y, count) {
+        for (let i = 0; i < count; i++) {
+          let particle = particlePool.length ? particlePool.pop() : {};
+          particle.x = x;
+          particle.y = y;
+          particle.vx = (Math.random() - 0.5) * 5;
+          particle.vy = (Math.random() - 0.5) * 5;
+          particle.size = Math.random() * 5 + 2;
+          particle.life = 30;
+          particle.color = `hsl(${Math.random() * 360}, 100%, 50%)`;
+          gameState.particles.push(particle);
+        }
+      }
+
+      // Heart path
+      const heartPath = new Path2D();
+      heartPath.moveTo(0, 5);
+      heartPath.bezierCurveTo(0, 0, -10, -5, -10, -10);
+      heartPath.bezierCurveTo(-10, -15, 0, -15, 0, -10);
+      heartPath.bezierCurveTo(0, -15, 10, -15, 10, -10);
+      heartPath.bezierCurveTo(10, -5, 0, 0, 0, 5);
+      heartPath.closePath();
+      function drawHeart(x, y, filled, size = 20) {
+        const scale = size / 20;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(scale, scale);
+        if (filled) {
+          ctx.fillStyle = "#ff0000";
+          ctx.fill(heartPath);
+        } else {
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = 2 / scale;
+          ctx.stroke(heartPath);
+        }
+        ctx.restore();
+      }
+
+      function checkObstacleOverlap(newObstacle, obstacles, maxY = 200) {
+        for (let obstacle of obstacles) {
+          if (obstacle.y > maxY) continue;
+          if (
+            Math.abs(newObstacle.x - obstacle.x) < (newObstacle.width + obstacle.width) / 2 &&
+            Math.abs(newObstacle.y - obstacle.y) < (newObstacle.height + obstacle.height) / 2
+          ) {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      function spawnObstacles() {
+        if (gameState.lastSpawn <= 0) {
+          let pattern = Math.random();
+          let sushiPattern = Math.random();
+          const canvasWidth = canvas.width;
+          let safeMinX = canvasWidth * 0.1;
+          let safeMaxX = canvasWidth * 0.9;
+          let newObstacles = [];
+
+          // Always spawn one obstacle
+          let type = obstacleTypes[Math.floor(Math.random() * obstacleTypes.length)];
+          let x = safeMinX + Math.random() * (safeMaxX - safeMinX);
+          let obstacle = {
+            x,
+            y: -50,
+            width: type.width,
+            height: type.height,
+            color: type.color,
+            destructible: type.destructible,
+            type: type.type,
+            vx:
+              type.type === "moving" || type.type === "diagonal"
+                ? Math.random() > 0.5
+                  ? type.speed * gameState.difficultyFactor
+                  : -type.speed * gameState.difficultyFactor
+                : 0,
+            vy: type.type === "diagonal" ? type.vy * gameState.difficultyFactor : 0,
+          };
+          if (!checkObstacleOverlap(obstacle, gameState.obstacles)) newObstacles.push(obstacle);
+
+          // Power-up (10% chance)
+          if (pattern < 0.1) {
+            let powerUpPattern = Math.random() * 6;
+            let powerUp;
+            if (powerUpPattern < 3)
+              powerUp = powerUpTypes[0]; // Speed
+            else if (powerUpPattern < 3.5)
+              powerUp = powerUpTypes[1]; // Shield
+            else if (powerUpPattern < 4)
+              powerUp = powerUpTypes[4]; // Life
+            else if (powerUpPattern < 5)
+              powerUp = powerUpTypes[2]; // Range
+            else powerUp = powerUpTypes[3]; // Cooldown
+            let x = safeMinX + Math.random() * (safeMaxX - safeMinX);
+            gameState.powerUps.push({
+              x,
+              y: -50,
+              width: powerUp.type === "life" ? 20 : 30,
+              height: powerUp.type === "life" ? 20 : 30,
+              color: powerUp.color,
+              type: powerUp.type,
+              effect: powerUp.effect,
+            });
+          }
+
+          // Creature (10% chance)
+          if (pattern < 0.2 && pattern >= 0.1) {
+            let x = safeMinX + Math.random() * (safeMaxX - safeMinX);
+            gameState.creatures.push({
+              x,
+              y: -50,
+              width: 20,
+              height: 20,
+              color: "#ffffff",
+              flightOffset: 0,
+              flightAmplitude: 10,
+              flightSpeed: 0.008335,
+            });
+          }
+
+          // Sushi roll (37.5% chance)
+          if (sushiPattern < 0.375) {
+            let x = safeMinX + Math.random() * (safeMaxX - safeMinX);
+            gameState.sushiRolls.push({ x, y: -50, width: 15, height: 15, color: "#ff9900" });
+          }
+
+          gameState.obstacles.push(...newObstacles);
+          gameState.lastSpawn = gameState.spawnInterval;
+        } else {
+          gameState.lastSpawn--;
+        }
+      }
+
+      function checkCollision(rect1, rect2) {
+        return (
+          rect1.x < rect2.x + rect2.width &&
+          rect1.x + rect1.width > rect2.x &&
+          rect1.y < rect2.y + rect2.height &&
+          rect1.y + rect1.height > rect2.y
+        );
+      }
+
+      function createAttackWave() {
+        if (gameState.player.attackCooldown <= 0) {
+          window.FarcadeSDK.singlePlayer.actions.hapticFeedback();
+          gameState.attackWaves.push({
+            x: gameState.player.x - gameState.player.attackWaveWidth / 2,
+            y: gameState.player.y - 15,
+            width: gameState.player.attackWaveWidth,
+            height: 20,
+            visualWidth: gameState.player.attackWaveVisualWidth,
+            visualHeight: gameState.player.attackWaveVisualHeight,
+            vy: -10,
+            range: gameState.player.attackRange,
+          });
+          gameState.player.attackCooldown = gameState.player.attackCooldownBase;
+          gameState.player.isAttacking = true;
+          gameState.player.attackAnimationTimer = gameState.player.attackAnimationDuration;
+          playSound(swordSwingSound);
+        }
+      }
+
+      function gameLoop(timestamp) {
+        if (!gameState || !canvas || !ctx) return;
+        if (!gameState.isRunning) return;
+
+        let deltaTime = Math.min(2, (timestamp - gameState.lastTime) / 16.67);
+        gameState.lastTime = timestamp;
+
+        // Update difficulty
+        gameState.difficultyFactor = 1 + gameState.distance / 3400;
+        gameState.spawnInterval = Math.max(20, 60 - gameState.distance / 127.5);
+        gameState.speed = Math.min(10, gameState.baseSpeed + gameState.distance / 1275);
+
+        // Player movement
+        let moveLeft = keys["a"] || keys["A"] || keys["ArrowLeft"] || leftArrowPressed;
+        let moveRight = keys["d"] || keys["D"] || keys["ArrowRight"] || rightArrowPressed;
+        if (moveLeft && !moveRight) {
+          gameState.player.velocityX = Math.max(
+            -gameState.player.maxSpeed,
+            gameState.player.velocityX - gameState.player.acceleration * deltaTime,
+          );
+        } else if (moveRight && !moveLeft) {
+          gameState.player.velocityX = Math.min(
+            gameState.player.maxSpeed,
+            gameState.player.velocityX + gameState.player.acceleration * deltaTime,
+          );
+        } else {
+          gameState.player.velocityX *= gameState.player.friction;
+        }
+        gameState.player.x += gameState.player.velocityX * deltaTime;
+        gameState.player.x = Math.max(
+          gameState.player.width / 2,
+          Math.min(canvas.width - gameState.player.width / 2, gameState.player.x),
+        );
+
+        // Animations
+        gameState.player.lastFrameSwitch += deltaTime * 16.67;
+        if (gameState.player.lastFrameSwitch >= gameState.player.frameDuration) {
+          gameState.player.currentFrame = (gameState.player.currentFrame + 1) % 2;
+          gameState.player.lastFrameSwitch = 0;
+        }
+        if (gameState.player.isAttacking) {
+          gameState.player.attackAnimationTimer -= deltaTime * 16.67;
+          if (gameState.player.attackAnimationTimer <= 0) gameState.player.isAttacking = false;
+        }
+
+        // Invulnerability
+        if (gameState.player.isInvulnerable) {
+          gameState.player.invulnerabilityTimer -= deltaTime * 16.67;
+          gameState.player.blinkTimer -= deltaTime * 16.67;
+          if (gameState.player.blinkTimer <= 0) {
+            gameState.player.isVisible = !gameState.player.isVisible;
+            gameState.player.blinkTimer = 100;
+          }
+          if (gameState.player.invulnerabilityTimer <= 0 && !gameState.player.shieldActive) {
+            gameState.player.isInvulnerable = false;
+            gameState.player.isVisible = true;
+          }
+        }
+
+        // Shield
+        if (gameState.player.shieldActive) {
+          gameState.player.shieldTimer -= deltaTime * 16.67;
+          if (gameState.player.shieldTimer <= 0) {
+            gameState.player.shield = false;
+            gameState.player.isInvulnerable = false;
+            gameState.player.shieldActive = false;
+            gameState.player.shieldBlinkActive = false;
+            gameState.player.isVisible = true;
+          }
+          if (gameState.player.shieldBlinkActive) {
+            gameState.player.shieldBlinkTimer -= deltaTime * 16.67;
+            if (gameState.player.shieldBlinkTimer <= 0) {
+              gameState.player.isVisible = !gameState.player.isVisible;
+              gameState.player.shieldBlinkTimer = gameState.player.blinkInterval;
+            }
+          }
+        }
+
+        // Attack
+        if ((isAttacking || keys[" "] || attackButtonPressed) && gameState.player.attackCooldown <= 0)
+          createAttackWave();
+        gameState.player.attackCooldown = Math.max(0, gameState.player.attackCooldown - deltaTime);
+        isAttacking = false;
+
+        // Update distance and score
+        gameState.distance += (gameState.speed * deltaTime) / 60;
+        gameState.score += (0.01 * (gameState.speed * deltaTime)) / 60;
+
+        spawnObstacles();
+
+        // Update entities
+        let obstaclesToRemove = [];
+        let sushiToRemove = [];
+        let powerUpsToRemove = [];
+        let creaturesToRemove = [];
+        for (let obstacle of gameState.obstacles) {
+          if (obstacle.y >= -100 && obstacle.y <= canvas.height) {
+            obstacle.y += (gameState.speed + (obstacle.vy || 0)) * deltaTime;
+            if (obstacle.type === "moving" || obstacle.type === "diagonal") {
+              obstacle.x += obstacle.vx * deltaTime;
+              if (obstacle.x < obstacle.width / 2 || obstacle.x > canvas.width - obstacle.width / 2)
+                obstacle.vx = -obstacle.vx;
+            }
+            if (obstacle.y > canvas.height) obstaclesToRemove.push(obstacle);
+            else if (
+              checkCollision(gameState.player, obstacle) &&
+              !gameState.player.shield &&
+              !gameState.player.isInvulnerable
+            ) {
+              gameState.lives--;
+              gameState.consecutiveHits = 0;
+              gameState.multiplier = 1;
+              obstaclesToRemove.push(obstacle);
+              playSound(loseLifeSound);
+              if (gameState.lives > 0) {
+                gameState.player.isInvulnerable = true;
+                gameState.player.invulnerabilityTimer = gameState.player.invulnerabilityDuration;
+                gameState.player.blinkTimer = 100;
+                gameState.player.isVisible = false;
+              }
+              if (gameState.lives <= 0) {
+                endGame();
+                return;
+              }
+            }
+          }
+        }
+
+        for (let creature of gameState.creatures) {
+          if (creature.y >= -100 && creature.y <= canvas.height) {
+            creature.y += gameState.speed * deltaTime;
+            creature.flightOffset = Math.sin(timestamp * creature.flightSpeed) * creature.flightAmplitude;
+            if (creature.y > canvas.height) creaturesToRemove.push(creature);
+          }
+        }
+
+        for (let sushi of gameState.sushiRolls) {
+          if (sushi.y >= -100 && sushi.y <= canvas.height) {
+            sushi.y += gameState.speed * deltaTime;
+            if (sushi.y > canvas.height) sushiToRemove.push(sushi);
+            else if (checkCollision(gameState.player, sushi)) {
+              sushiToRemove.push(sushi);
+              gameState.score += 5;
+              createParticles(sushi.x, sushi.y, 5);
+              playSound(collectBonusSound);
+            }
+          }
+        }
+
+        for (let powerUp of gameState.powerUps) {
+          if (powerUp.y >= -100 && powerUp.y <= canvas.height) {
+            powerUp.y += gameState.speed * deltaTime;
+            if (powerUp.y > canvas.height) powerUpsToRemove.push(powerUp);
+            else if (checkCollision(gameState.player, powerUp)) {
+              powerUp.effect();
+              powerUpsToRemove.push(powerUp);
+              createParticles(powerUp.x, powerUp.y, 5);
+              playSound(collectBonusSound);
+            }
+          }
+        }
+
+        gameState.attackWaves = gameState.attackWaves.filter((w) => w.y > -w.height && w.range > 0);
+        for (let wave of gameState.attackWaves) {
+          wave.y += wave.vy * deltaTime;
+          wave.range -= Math.abs(wave.vy) * deltaTime;
+          for (let obstacle of gameState.obstacles) {
+            if (checkCollision(wave, obstacle) && obstacle.destructible) {
+              obstaclesToRemove.push(obstacle);
+              gameState.consecutiveHits++;
+              gameState.multiplier = Math.min(5, 1 + Math.floor(gameState.consecutiveHits / 5));
+              if (obstacle.color === "#44ff44") {
+                gameState.score += 10 * gameState.multiplier;
+                playSound(barricadeBreakSound);
+              } else if (obstacle.color === "#ffaa00") {
+                gameState.score += 50 * gameState.multiplier;
+                playSound(ghostDieSound);
+              }
+              createParticles(obstacle.x, obstacle.y, 10);
+            }
+          }
+          for (let creature of gameState.creatures) {
+            if (checkCollision(wave, creature) && !gameState.player.isInvulnerable) {
+              creaturesToRemove.push(creature);
+              gameState.lives--;
+              gameState.consecutiveHits = 0;
+              gameState.multiplier = 1;
+              playSound(loseLifeSound);
+              if (gameState.lives > 0) {
+                gameState.player.isInvulnerable = true;
+                gameState.player.invulnerabilityTimer = gameState.player.invulnerabilityDuration;
+                gameState.player.blinkTimer = 100;
+                gameState.player.isVisible = false;
+              }
+              if (gameState.lives <= 0) {
+                endGame();
+                return;
+              }
+            }
+          }
+        }
+
+        // Remove entities
+        gameState.obstacles = gameState.obstacles.filter((o) => !obstaclesToRemove.includes(o));
+        gameState.sushiRolls = gameState.sushiRolls.filter((s) => !sushiToRemove.includes(s));
+        gameState.powerUps = gameState.powerUps.filter((p) => !powerUpsToRemove.includes(p));
+        gameState.creatures = gameState.creatures.filter((c) => !creaturesToRemove.includes(c));
+
+        // Update particles
+        for (let i = gameState.particles.length - 1; i >= 0; i--) {
+          let particle = gameState.particles[i];
+          particle.x += particle.vx * deltaTime;
+          particle.y += particle.vy * deltaTime;
+          particle.life--;
+          particle.size *= 0.95;
+          if (particle.life <= 0) {
+            particlePool.push(particle);
+            gameState.particles.splice(i, 1);
+          }
+        }
+
+        // Render
+        ctx.clearRect(0, 0, canvas.width, canvas.height); // Очищаем канвас для прозрачности
+
+        // 1. Рендеринг ям (indestructible obstacles, #ff4444)
+        for (let obstacle of gameState.obstacles) {
+          if (obstacle.y >= -100 && obstacle.y <= canvas.height && obstacle.color === "#ff4444") {
+            if (indestructibleSprite.complete && indestructibleSprite.naturalWidth > 0) {
+              ctx.drawImage(
+                indestructibleSprite,
+                obstacle.x - obstacle.width * 1.125,
+                obstacle.y - obstacle.height * 1.125,
+                obstacle.width * 2.25,
+                obstacle.height * 2.25,
+              );
+            } else {
+              ctx.fillStyle = "#ff4444";
+              ctx.fillRect(
+                obstacle.x - obstacle.width / 2,
+                obstacle.y - obstacle.height / 2,
+                obstacle.width,
+                obstacle.height,
+              );
+            }
+          }
+        }
+
+        // 2. Рендеринг барьеров (#44ff44)
+        for (let obstacle of gameState.obstacles) {
+          if (obstacle.y >= -100 && obstacle.y <= canvas.height && obstacle.color === "#44ff44") {
+            if (barricadeSprite.complete && barricadeSprite.naturalWidth > 0) {
+              ctx.drawImage(
+                barricadeSprite,
+                obstacle.x - obstacle.width * 1.125,
+                obstacle.y - obstacle.height * 1.125,
+                obstacle.width * 2.25,
+                obstacle.height * 2.25,
+              );
+            } else {
+              ctx.fillStyle = "#44ff44";
+              ctx.fillRect(
+                obstacle.x - obstacle.width / 2,
+                obstacle.y - obstacle.height / 2,
+                obstacle.width,
+                obstacle.height,
+              );
+            }
+          }
+        }
+
+        // 3. Рендеринг суши-роллов
+        for (let sushi of gameState.sushiRolls) {
+          if (sushi.y >= -100 && sushi.y <= canvas.height) {
+            if (sushiSprite.complete && sushiSprite.naturalWidth > 0) {
+              ctx.drawImage(
+                sushiSprite,
+                sushi.x - sushi.width * 1.5,
+                sushi.y - sushi.height * 1.5,
+                sushi.width * 3,
+                sushi.height * 3,
+              );
+            } else {
+              ctx.fillStyle = "#ff9900";
+              ctx.beginPath();
+              ctx.arc(sushi.x, sushi.y, sushi.width / 2, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+        }
+
+        // 4. Рендеринг пауэр-апов
+        for (let powerUp of gameState.powerUps) {
+          if (powerUp.y >= -100 && powerUp.y <= canvas.height) {
+            if (powerUp.type === "life") {
+              drawHeart(powerUp.x, powerUp.y, true, powerUp.width);
+            } else {
+              let sprite =
+                powerUp.type === "speed"
+                  ? speedPowerUpSprite
+                  : powerUp.type === "shield"
+                    ? shieldPowerUpSprite
+                    : powerUp.type === "weapon_range"
+                      ? weaponRangePowerUpSprite
+                      : weaponCooldownPowerUpSprite;
+              if (sprite.complete && sprite.naturalWidth > 0) {
+                const scale = 2;
+                ctx.drawImage(
+                  sprite,
+                  powerUp.x - (powerUp.width * scale) / 2,
+                  powerUp.y - (powerUp.height * scale) / 2,
+                  powerUp.width * scale,
+                  powerUp.height * scale,
+                );
+              } else {
+                ctx.fillStyle = powerUp.color;
+                ctx.beginPath();
+                ctx.arc(powerUp.x, powerUp.y, powerUp.width / 2, 0, Math.PI * 2);
+                ctx.fill();
+              }
+            }
+          }
+        }
+
+        // 5. Рендеринг бабочек
+        for (let creature of gameState.creatures) {
+          if (creature.y >= -100 && creature.y <= canvas.height) {
+            if (butterflySprite.complete && butterflySprite.naturalWidth > 0) {
+              ctx.drawImage(
+                butterflySprite,
+                creature.x - creature.width * 1.5,
+                creature.y + creature.flightOffset - creature.height * 1.5,
+                creature.width * 3,
+                creature.height * 3,
+              );
+            } else {
+              ctx.fillStyle = "#ffffff";
+              ctx.beginPath();
+              ctx.arc(creature.x, creature.y + creature.flightOffset, creature.width / 2, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+        }
+
+        // 6. Рендеринг призраков (#ffaa00)
+        for (let obstacle of gameState.obstacles) {
+          if (obstacle.y >= -100 && obstacle.y <= canvas.height && obstacle.color === "#ffaa00") {
+            if (ghostSprite.complete && ghostSprite.naturalWidth > 0) {
+              ctx.save();
+              ctx.translate(obstacle.x, obstacle.y);
+              if (obstacle.vx < 0) {
+                ctx.scale(-1, 1);
+              }
+              ctx.drawImage(
+                ghostSprite,
+                -(obstacle.width * 1.125),
+                -(obstacle.height * 1.125),
+                obstacle.width * 2.25,
+                obstacle.height * 2.25,
+              );
+              ctx.restore();
+            } else {
+              ctx.fillStyle = "#ffaa00";
+              ctx.fillRect(
+                obstacle.x - obstacle.width / 2,
+                obstacle.y - obstacle.height / 2,
+                obstacle.width,
+                obstacle.height,
+              );
+            }
+          }
+        }
+
+        // 7. Рендеринг волн атаки
+        for (let wave of gameState.attackWaves) {
+          if (attackWaveSprite.complete && attackWaveSprite.naturalWidth > 0) {
+            ctx.drawImage(
+              attackWaveSprite,
+              wave.x - (wave.visualWidth - wave.width) / 2,
+              wave.y - (wave.visualHeight - wave.height) / 2,
+              wave.visualWidth,
+              wave.visualHeight,
+            );
+          } else {
+            ctx.fillStyle = "rgba(255, 68, 68, 0.7)";
+            ctx.fillRect(wave.x, wave.y, wave.width, wave.height);
+          }
+        }
+
+        // 8. Рендеринг частиц
+        for (let particle of gameState.particles) {
+          ctx.fillStyle = particle.color;
+          ctx.beginPath();
+          ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // 9. Рендеринг игрока
+        if (gameState.player.isVisible) {
+          const playerSprite = gameState.player.isAttacking
+            ? warriorAttack
+            : gameState.player.currentFrame === 0
+              ? warriorLeftLeg
+              : warriorRightLeg;
+          if (playerSprite.complete && playerSprite.naturalWidth > 0) {
+            ctx.drawImage(
+              playerSprite,
+              gameState.player.x - gameState.player.visualWidth / 2,
+              gameState.player.y - gameState.player.visualHeight / 2,
+              gameState.player.visualWidth,
+              gameState.player.visualHeight,
+            );
+          } else {
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(
+              gameState.player.x - gameState.player.width / 2,
+              gameState.player.y - gameState.player.height / 2,
+              gameState.player.width,
+              gameState.player.height,
+            );
+          }
+        }
+
+        // 10. HUD
+        ctx.fillStyle = "#fff";
+        ctx.font = "20px Arial";
+        ctx.fillText(`Score: ${Math.floor(gameState.score)}`, 10, 30);
+        for (let i = 0; i < 3; i++) {
+          drawHeart(canvas.width - 55 - i * 25, 30, i < gameState.lives);
+        }
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(10, 50, 100, 10);
+        ctx.fillStyle = "#ff4444";
+        let energyFill = Math.max(0, 1 - gameState.player.attackCooldown / gameState.player.attackCooldownBase);
+        ctx.fillRect(10, 50, 100 * energyFill, 10);
+        if (gameState.player.shieldActive) {
+          ctx.strokeStyle = "#fff";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(10, 70, 100, 10);
+          ctx.fillStyle = "#00ffff";
+          let shieldFill = Math.max(0, gameState.player.shieldTimer / 5000);
+          ctx.fillRect(10, 70, 100 * shieldFill, 10);
+        }
+
+        // Mobile controls
+        ctx.fillStyle = `rgba(255, 255, 255, ${leftArrowPressed ? 1.0 : 0.5})`;
+        ctx.beginPath();
+        ctx.moveTo(40, canvas.height - 50);
+        ctx.lineTo(40, canvas.height - 10);
+        ctx.lineTo(10, canvas.height - 30);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = `rgba(255, 255, 255, ${rightArrowPressed ? 1.0 : 0.5})`;
+        ctx.beginPath();
+        ctx.moveTo(canvas.width - 40, canvas.height - 50);
+        ctx.lineTo(canvas.width - 40, canvas.height - 10);
+        ctx.lineTo(canvas.width - 10, canvas.height - 30);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = `rgba(255, 255, 255, ${attackButtonPressed ? 1.0 : 0.5})`;
+        ctx.beginPath();
+        ctx.arc(canvas.width / 2, canvas.height - 35, 25, 0, Math.PI * 2);
+        ctx.fill();
+
+        requestAnimationFrame(gameLoop);
+      }
+
+      function endGame() {
+        window.FarcadeSDK.singlePlayer.actions.gameOver({ score: Math.floor(gameState.score) });
+        gameState.isRunning = false;
+        if (gameState.score > highScore) {
+          highScore = Math.floor(gameState.score);
+          localStorage.setItem("highScore", highScore);
+        }
+        backgroundMusic.pause();
+        backgroundMusic.currentTime = 0;
+      }
+
+      function startGame() {
+        window.FarcadeSDK.singlePlayer.actions.ready();
+        startScreen.style.display = "none";
+        gameState.isRunning = true;
+        gameState.lastTime = performance.now();
+        requestAnimationFrame(gameLoop);
+      }
+
+      startButton.addEventListener("click", startGame);
+
+      restartButton.addEventListener("click", () => {
+        gameState = {
+          lives: 3,
+          score: 0,
+          distance: 0,
+          multiplier: 1,
+          consecutiveHits: 0,
+          speed: 5,
+          baseSpeed: 5,
+          difficultyFactor: 1,
+          player: {
+            x: canvas.width / 2,
+            y: canvas.height * 0.75,
+            width: 30,
+            height: 30,
+            visualWidth: 150,
+            visualHeight: 150,
+            velocityX: 0,
+            maxSpeed: 6,
+            acceleration: 0.8,
+            friction: 0.95,
+            shield: false,
+            shieldActive: false,
+            shieldTimer: 0,
+            shieldBlinkActive: false,
+            shieldBlinkTimer: 300,
+            attackRange: 200,
+            attackCooldown: 0,
+            attackWaveWidth: 30,
+            attackWaveVisualWidth: 112.5,
+            attackWaveVisualHeight: 75,
+            attackCooldownBase: 300,
+            speedBoost: false,
+            currentFrame: 0,
+            lastFrameSwitch: 0,
+            frameDuration: 200,
+            isAttacking: false,
+            attackAnimationTimer: 0,
+            attackAnimationDuration: 300,
+            isInvulnerable: false,
+            invulnerabilityTimer: 0,
+            invulnerabilityDuration: 1000,
+            isVisible: true,
+            blinkTimer: 0,
+            blinkInterval: 300,
+          },
+          obstacles: [],
+          powerUps: [],
+          creatures: [],
+          sushiRolls: [],
+          particles: [],
+          attackWaves: [],
+          lastSpawn: 0,
+          spawnInterval: 60,
+          isRunning: true,
+          lastTime: performance.now(),
+        };
+        particlePool.length = 0;
+        gameOverScreen.style.display = "none";
+        musicStarted = false;
+        requestAnimationFrame(gameLoop);
+      });
+
+      // SDK: Обработка событий play_again и toggle_mute
+      window.FarcadeSDK.on("play_again", () => {
+        restartButton.click();
+      });
+
+      window.FarcadeSDK.on("toggle_mute", (data) => {
+        backgroundMusic.muted = data.isMuted;
+        loseLifeSound.muted = data.isMuted;
+        collectBonusSound.muted = data.isMuted;
+        ghostDieSound.muted = data.isMuted;
+        barricadeBreakSound.muted = data.isMuted;
+        swordSwingSound.muted = data.isMuted;
+      });
+    </script>
+  </body>
+</html>
